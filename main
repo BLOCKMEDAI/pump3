@@ -1,0 +1,86 @@
+import time
+import requests
+from telegram import Bot
+from telegram.error import TelegramError  # <- ADICIONADO
+import logging
+import json
+import os
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_BOT_TOKEN = '7886005192:AAExBYx3YaXsXH4I71rePSdGThS7asmO93s'
+TELEGRAM_CHAT_ID = '855971772'
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+SENT_TOKENS_FILE = 'sent_tokens.json'
+
+def load_sent_tokens():
+    if os.path.exists(SENT_TOKENS_FILE):
+        with open(SENT_TOKENS_FILE, 'r') as f:
+            return set(json.load(f))
+    return set()
+
+def save_sent_tokens(sent_tokens):
+    with open(SENT_TOKENS_FILE, 'w') as f:
+        json.dump(list(sent_tokens), f)
+
+sent_tokens = load_sent_tokens()
+
+def fetch_new_tokens():
+    url = 'https://client-api-2-phi.vercel.app/api/trending'
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, list):
+            logger.error("Resposta da API não é uma lista válida")
+            return
+
+        for token in data:
+            address = token.get('address')
+            name = token.get('name')
+            twitter = token.get('twitter')
+            telegram_link = token.get('telegram')
+
+            if not address or not name:
+                logger.warning(f"Token sem endereço ou nome: {token}")
+                continue
+
+            if twitter and telegram_link and address not in sent_tokens:
+                message = (
+                    f"🚀 Novo token lançado no Pump.fun!\n\n"
+                    f"🪙 Nome: {name}\n"
+                    f"📄 Contrato: {address}\n"
+                    f"🐦 Twitter: {twitter}\n"
+                    f"📢 Telegram: {telegram_link}"
+                )
+                try:
+                    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+                    sent_tokens.add(address)
+                    save_sent_tokens(sent_tokens)
+                    logger.info(f"Mensagem enviada para token: {name} ({address})")
+                    time.sleep(2)
+                except TelegramError as te:
+                    logger.error(f"Erro ao enviar mensagem: {te}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Erro ao buscar tokens da API: {e}")
+    except ValueError as e:
+        logger.error(f"Erro ao processar JSON da API: {e}")
+
+def main():
+    while True:
+        try:
+            fetch_new_tokens()
+            time.sleep(30)
+        except KeyboardInterrupt:
+            logger.info("Script interrompido")
+            break
+        except Exception as e:
+            logger.error(f"Erro inesperado: {e}")
+            time.sleep(60)
+
+if name == "__main__":
+    main()
